@@ -1,0 +1,10 @@
+node_modules/
+.output/
+.wxt/
+*.zip
+dist/
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
