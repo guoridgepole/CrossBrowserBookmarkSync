@@ -143,3 +143,56 @@ button {
   margin-top: 2px;
   flex-shrink: 0;
 }
+
+.hint {
+  font-size: 12px;
+  color: #888;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.hint.success-text {
+  color: #1a7a1a;
+  font-weight: 500;
+}
+
+.conflict-card {
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+  background: #fafafa;
+}
+
+.conflict-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 10px;
+  word-break: break-word;
+}
+
+.conflict-versions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.conflict-version {
+  flex: 1;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: #fff;
+  word-break: break-word;
+}
+
+.conflict-url {
+  color: #2b6cb0;
+  font-size: 11px;
+}
+
+.conflict-card .actions {
+  margin-top: 8px;
+}

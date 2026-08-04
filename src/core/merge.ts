@@ -14,7 +14,8 @@
  * 6. Dedup: same parent + same folder title → merge children
  */
 
-import type { BookmarkNode } from './types';
+import type { BookmarkNode, SyncConflict } from './types';
+import { isRootFolder } from './types';
 import { flattenTree } from './diff-engine';
 import { normalizeURL } from './stable-id';
 
@@ -24,19 +25,33 @@ interface FlatEntry {
   index: number;
 }
 
+/** Result of a three-way merge: the merged tree plus any true conflicts. */
+export interface MergeResult {
+  /** The merged bookmark tree (auto-resolved via Last-Write-Wins). */
+  tree: BookmarkNode[];
+  /**
+   * True conflicts: nodes modified on BOTH sides since the base with differing
+   * content. Each was already auto-resolved by LWW (see `autoChosen`) so the
+   * sync stays non-blocking; the list lets the user review/override later.
+   */
+  conflicts: SyncConflict[];
+}
+
 /**
  * Perform a three-way merge of bookmark trees.
+ * Returns both the merged tree and the list of true conflicts detected.
  */
 export function mergeTrees(
   localTree: BookmarkNode[],
   remoteTree: BookmarkNode[],
   baseTree: BookmarkNode[],
-): BookmarkNode[] {
+): MergeResult {
   const localMap = flattenTree(localTree);
   const remoteMap = flattenTree(remoteTree);
   const baseMap = flattenTree(baseTree);
 
   const mergedMap = new Map<string, FlatEntry>();
+  const conflicts: SyncConflict[] = [];
 
   // Collect all unique stableIds
   const allIds = new Set<string>([
@@ -50,14 +65,27 @@ export function mergeTrees(
     const remote = remoteMap.get(stableId);
     const base = baseMap.get(stableId);
 
-    const result = mergeNode(stableId, local, remote, base, localMap, remoteMap, baseMap);
+    const result = mergeNode(stableId, local, remote, base, localMap, remoteMap, baseMap, conflicts);
     if (result) {
       mergedMap.set(stableId, result);
     }
   }
 
   // Reconstruct tree from flat map
-  return reconstructTree(mergedMap);
+  return { tree: reconstructTree(mergedMap), conflicts };
+}
+
+/**
+ * Whether two alive nodes carry identical user-visible content.
+ * Bookmarks compare title + normalized URL; folders compare title.
+ */
+function sameContent(a: BookmarkNode, b: BookmarkNode): boolean {
+  if (a.type !== b.type) return false;
+  if (a.title !== b.title) return false;
+  if (a.type === 'bookmark') {
+    return normalizeURL(a.url ?? '') === normalizeURL(b.url ?? '');
+  }
+  return true; // folders: title already compared
 }
 
 function mergeNode(
@@ -68,6 +96,7 @@ function mergeNode(
   localMap: Map<string, FlatEntry>,
   remoteMap: Map<string, FlatEntry>,
   baseMap: Map<string, FlatEntry>,
+  conflicts: SyncConflict[],
 ): FlatEntry | null {
   // Case 1: Only exists on one side (new addition)
   if (local && !remote) {
@@ -139,10 +168,32 @@ function mergeNode(
   }
 
   // Both alive - Last-Write-Wins
-  if (localNode.lastModified >= remoteNode.lastModified) {
-    return local;
+  const chosen =
+    localNode.lastModified >= remoteNode.lastModified ? local : remote;
+
+  // Detect a true conflict: BOTH sides modified since the base AND the content
+  // differs. Record it (non-blocking) so the user can review the LWW choice.
+  // Root folders are browser-managed (titles differ across locales/browsers)
+  // and can never be updated, so skip conflict detection for them.
+  const baseModified = base?.node.lastModified ?? 0;
+  const localChanged = localNode.lastModified > baseModified;
+  const remoteChanged = remoteNode.lastModified > baseModified;
+  if (!isRootFolder(stableId) && localChanged && remoteChanged && !sameContent(localNode, remoteNode)) {
+    conflicts.push({
+      stableId,
+      type: localNode.type,
+      title: chosen.node.title,
+      url: chosen.node.url,
+      local: localNode,
+      remote: remoteNode,
+      base: base?.node,
+      autoChosen: chosen === local ? 'local' : 'remote',
+      timestamp: Date.now(),
+      resolved: false,
+    });
   }
-  return remote;
+
+  return chosen;
 }
 
 /**

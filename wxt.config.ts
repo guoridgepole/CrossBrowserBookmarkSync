@@ -11,6 +11,12 @@ export default defineConfig({
       description:
         'Cross-browser bookmark sync supporting S3 and WebDAV storage backends',
       version: '0.1.0',
+      icons: {
+        16: 'icon-16.png',
+        32: 'icon-32.png',
+        48: 'icon-48.png',
+        128: 'icon-128.png',
+      },
       // Firefox (MV2) needs the host permission declared STATICALLY: permissions
       // granted at runtime via optional_permissions + permissions.request() do not
       // reliably disable CORS for background requests (both fetch and XHR stay

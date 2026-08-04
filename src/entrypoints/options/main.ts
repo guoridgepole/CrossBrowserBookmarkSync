@@ -2,7 +2,7 @@
  * Options page logic: backend configuration, sync interval, connection test.
  */
 
-import type { AppSettings, BackendType } from '@/core/types';
+import type { AppSettings, BackendType, BookmarkNode, SyncConflict } from '@/core/types';
 import { getSettings, saveSettings } from '@/config/store';
 import { getRequiredOrigins } from '@/storage/origins';
 
@@ -12,6 +12,28 @@ const s3Config = document.getElementById('s3-config')!;
 const saveBtn = document.getElementById('save-btn')!;
 const testBtn = document.getElementById('test-btn')!;
 const messageEl = document.getElementById('message')!;
+
+// Encryption elements
+const encryptionOff = document.getElementById('encryption-off')!;
+const encryptionOn = document.getElementById('encryption-on')!;
+const enableEncryptionBtn = document.getElementById('enable-encryption-btn')!;
+const disableEncryptionBtn = document.getElementById('disable-encryption-btn')!;
+const changePasswordBtn = document.getElementById('change-password-btn')!;
+const encInputs = {
+  password: document.getElementById('enc-password') as HTMLInputElement,
+  passwordConfirm: document.getElementById('enc-password-confirm') as HTMLInputElement,
+  oldPassword: document.getElementById('enc-old-password') as HTMLInputElement,
+  newPassword: document.getElementById('enc-new-password') as HTMLInputElement,
+};
+
+function renderEncryptionState(enabled: boolean): void {
+  encryptionOff.classList.toggle('hidden', enabled);
+  encryptionOn.classList.toggle('hidden', !enabled);
+}
+
+// Conflicts elements
+const conflictsEmpty = document.getElementById('conflicts-empty')!;
+const conflictsList = document.getElementById('conflicts-list')!;
 
 // Input elements
 const inputs = {
@@ -58,6 +80,8 @@ async function loadSettings(): Promise<void> {
   }
 
   inputs.syncInterval.value = String(settings.syncIntervalMinutes ?? 30);
+
+  renderEncryptionState(settings.encryption?.enabled ?? false);
 }
 
 /**
@@ -139,11 +163,15 @@ saveBtn.addEventListener('click', async () => {
   if (!(await ensureHostPermissions(getRequiredOrigins(formSettings)))) {
     return;
   }
-  // Preserve the existing deviceId across saves
+  // Preserve the existing deviceId and encryption flag across saves.
+  // The form has no encryption inputs; dropping this field would silently
+  // wipe the flag while the persisted key remains, causing the sync engine's
+  // reconcile logic to re-enable encryption behind the user's back.
   const existing = await getSettings();
   const settings: AppSettings = {
     ...formSettings,
     deviceId: existing?.deviceId ?? formSettings.deviceId,
+    encryption: existing?.encryption,
   };
   await saveSettings(settings);
   showMessage('Settings saved! Periodic sync schedule updated.', 'success');
@@ -190,4 +218,215 @@ function showMessage(text: string, type: 'success' | 'error' | 'info'): void {
   setTimeout(() => messageEl.classList.add('hidden'), 5000);
 }
 
+// --- Encryption management ---
+
+enableEncryptionBtn.addEventListener('click', async () => {
+  const password = encInputs.password.value;
+  const confirm = encInputs.passwordConfirm.value;
+  if (!password) {
+    showMessage('Please enter a master password', 'error');
+    return;
+  }
+  if (password !== confirm) {
+    showMessage('Passwords do not match', 'error');
+    return;
+  }
+
+  // Encryption operates on the SAVED backend. If nothing is saved yet, persist
+  // the current form first so the background worker can build a storage backend.
+  if (!(await getSettings())) {
+    const formSettings = readFormSettings();
+    if (typeof formSettings === 'string') {
+      showMessage(
+        'Please fill in the storage backend above before enabling encryption.',
+        'error',
+      );
+      return;
+    }
+    if (!(await ensureHostPermissions(getRequiredOrigins(formSettings)))) {
+      return;
+    }
+    await saveSettings(formSettings);
+  }
+
+  enableEncryptionBtn.setAttribute('disabled', 'true');
+  showMessage('Enabling encryption...', 'info');
+  try {
+    const response = (await browser.runtime.sendMessage({
+      type: 'SETUP_ENCRYPTION',
+      password,
+    })) as { success?: boolean; error?: string } | undefined;
+    if (response?.success) {
+      showMessage('Encryption enabled. Remote data is now encrypted.', 'success');
+      encInputs.password.value = '';
+      encInputs.passwordConfirm.value = '';
+      renderEncryptionState(true);
+    } else {
+      showMessage(`Failed to enable encryption: ${response?.error ?? 'Unknown error'}`, 'error');
+    }
+  } catch (err) {
+    showMessage(`Encryption error: ${err}`, 'error');
+  } finally {
+    enableEncryptionBtn.removeAttribute('disabled');
+  }
+});
+
+disableEncryptionBtn.addEventListener('click', async () => {
+  disableEncryptionBtn.setAttribute('disabled', 'true');
+  showMessage('Disabling encryption...', 'info');
+  try {
+    const response = (await browser.runtime.sendMessage({
+      type: 'DISABLE_ENCRYPTION',
+    })) as { success?: boolean; error?: string } | undefined;
+    if (response?.success) {
+      showMessage('Encryption disabled. Remote data is now stored in plaintext.', 'success');
+      encInputs.oldPassword.value = '';
+      encInputs.newPassword.value = '';
+      renderEncryptionState(false);
+    } else {
+      showMessage(`Failed to disable encryption: ${response?.error ?? 'Unknown error'}`, 'error');
+    }
+  } catch (err) {
+    showMessage(`Encryption error: ${err}`, 'error');
+  } finally {
+    disableEncryptionBtn.removeAttribute('disabled');
+  }
+});
+
+changePasswordBtn.addEventListener('click', async () => {
+  const oldPassword = encInputs.oldPassword.value;
+  const newPassword = encInputs.newPassword.value;
+  if (!newPassword) {
+    showMessage('Please enter a new password', 'error');
+    return;
+  }
+  changePasswordBtn.setAttribute('disabled', 'true');
+  showMessage('Changing password...', 'info');
+  try {
+    const response = (await browser.runtime.sendMessage({
+      type: 'CHANGE_PASSWORD',
+      oldPassword,
+      newPassword,
+    })) as { success?: boolean; error?: string } | undefined;
+    if (response?.success) {
+      showMessage('Master password changed and remote data re-encrypted.', 'success');
+      encInputs.oldPassword.value = '';
+      encInputs.newPassword.value = '';
+    } else {
+      showMessage(`Failed to change password: ${response?.error ?? 'Unknown error'}`, 'error');
+    }
+  } catch (err) {
+    showMessage(`Encryption error: ${err}`, 'error');
+  } finally {
+    changePasswordBtn.removeAttribute('disabled');
+  }
+});
+
 loadSettings();
+loadConflicts();
+
+// --- Conflict review ---
+
+/**
+ * Fetch unresolved conflicts from the background worker and render them.
+ */
+async function loadConflicts(): Promise<void> {
+  try {
+    const response = (await browser.runtime.sendMessage({ type: 'GET_CONFLICTS' })) as
+      | { status?: string; conflicts?: SyncConflict[] }
+      | undefined;
+    const conflicts = (response?.conflicts ?? []).filter((c) => !c.resolved);
+    renderConflicts(conflicts);
+  } catch (err) {
+    // Background may be unavailable; leave the section in its default state.
+    console.error('Failed to load conflicts:', err);
+  }
+}
+
+function renderConflicts(conflicts: SyncConflict[]): void {
+  conflictsList.innerHTML = '';
+  conflictsEmpty.classList.toggle('hidden', conflicts.length > 0);
+
+  for (const conflict of conflicts) {
+    const card = document.createElement('div');
+    card.className = 'conflict-card';
+
+    const heading = document.createElement('div');
+    heading.className = 'conflict-title';
+    heading.textContent = conflict.title || '(untitled)';
+    card.appendChild(heading);
+
+    const versions = document.createElement('div');
+    versions.className = 'conflict-versions';
+    versions.appendChild(versionBox('Local', conflict.local));
+    versions.appendChild(versionBox('Remote', conflict.remote));
+    card.appendChild(versions);
+
+    const autoNote = document.createElement('div');
+    autoNote.className = 'hint';
+    autoNote.textContent = `Currently keeping the ${conflict.autoChosen} version.`;
+    card.appendChild(autoNote);
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+
+    const keepLocal = document.createElement('button');
+    keepLocal.className = 'btn-secondary';
+    keepLocal.textContent = 'Keep Local';
+    keepLocal.addEventListener('click', () => resolveConflictUI(conflict.stableId, 'local'));
+
+    const keepRemote = document.createElement('button');
+    keepRemote.className = 'btn-secondary';
+    keepRemote.textContent = 'Keep Remote';
+    keepRemote.addEventListener('click', () => resolveConflictUI(conflict.stableId, 'remote'));
+
+    actions.appendChild(keepLocal);
+    actions.appendChild(keepRemote);
+    card.appendChild(actions);
+
+    conflictsList.appendChild(card);
+  }
+}
+
+/** Build a small panel showing one version (title + url) of a conflict. */
+function versionBox(label: string, node: BookmarkNode): HTMLDivElement {
+  const box = document.createElement('div');
+  box.className = 'conflict-version';
+
+  const strong = document.createElement('strong');
+  strong.textContent = label;
+  box.appendChild(strong);
+  box.appendChild(document.createElement('br'));
+  box.appendChild(document.createTextNode(node.title || '(untitled)'));
+
+  if (node.url) {
+    box.appendChild(document.createElement('br'));
+    const urlSpan = document.createElement('span');
+    urlSpan.className = 'conflict-url';
+    urlSpan.textContent = node.url;
+    box.appendChild(urlSpan);
+  }
+  return box;
+}
+
+async function resolveConflictUI(
+  stableId: string,
+  choice: 'local' | 'remote',
+): Promise<void> {
+  showMessage(`Resolving conflict (keeping ${choice})...`, 'info');
+  try {
+    const response = (await browser.runtime.sendMessage({
+      type: 'RESOLVE_CONFLICT',
+      stableId,
+      choice,
+    })) as { success?: boolean; error?: string } | undefined;
+    if (response?.success) {
+      showMessage(`Conflict resolved. The ${choice} version was kept and is syncing.`, 'success');
+      await loadConflicts();
+    } else {
+      showMessage(`Failed to resolve conflict: ${response?.error ?? 'Unknown error'}`, 'error');
+    }
+  } catch (err) {
+    showMessage(`Resolve error: ${err}`, 'error');
+  }
+}

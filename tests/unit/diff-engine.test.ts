@@ -62,8 +62,8 @@ describe('computeDiff', () => {
 
     const ops = computeDiff(local, target);
     expect(ops).toHaveLength(1);
-    expect(ops[0].type).toBe('CREATE');
-    expect(ops[0].stableId).toBe('b1');
+    expect(ops[0]!.type).toBe('CREATE');
+    expect(ops[0]!.stableId).toBe('b1');
   });
 
   it('should generate REMOVE for deleted nodes', () => {
@@ -76,8 +76,8 @@ describe('computeDiff', () => {
 
     const ops = computeDiff(local, target);
     expect(ops).toHaveLength(1);
-    expect(ops[0].type).toBe('REMOVE');
-    expect(ops[0].stableId).toBe('b1');
+    expect(ops[0]!.type).toBe('REMOVE');
+    expect(ops[0]!.stableId).toBe('b1');
   });
 
   it('should generate UPDATE for title changes', () => {
@@ -95,7 +95,7 @@ describe('computeDiff', () => {
     const ops = computeDiff(local, target);
     const updateOps = ops.filter((op) => op.type === 'UPDATE');
     expect(updateOps).toHaveLength(1);
-    expect(updateOps[0].title).toBe('New Title');
+    expect(updateOps[0]!.title).toBe('New Title');
   });
 
   it('should generate CREATE for folder before bookmarks', () => {

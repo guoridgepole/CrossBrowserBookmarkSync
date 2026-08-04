@@ -2,6 +2,8 @@ const statusEl = document.getElementById('status')!;
 const lastSyncEl = document.getElementById('last-sync')!;
 const syncBtn = document.getElementById('sync-btn') as HTMLButtonElement;
 const optionsBtn = document.getElementById('options-btn')!;
+const conflictBadge = document.getElementById('conflict-badge')!;
+const conflictCountEl = document.getElementById('conflict-count')!;
 
 // Get current status on load
 browser.runtime.sendMessage({ type: 'GET_STATUS' }).then((response: any) => {
@@ -18,6 +20,30 @@ browser.runtime.sendMessage({ type: 'GET_STATUS' }).then((response: any) => {
   }
 });
 
+// Show a badge when there are unresolved merge conflicts.
+function loadConflictBadge(): void {
+  browser.runtime
+    .sendMessage({ type: 'GET_CONFLICTS' })
+    .then((response: any) => {
+      const conflicts = (response?.conflicts ?? []).filter((c: any) => !c.resolved);
+      if (conflicts.length > 0) {
+        conflictCountEl.textContent = String(conflicts.length);
+        conflictBadge.classList.remove('hidden');
+      } else {
+        conflictBadge.classList.add('hidden');
+      }
+    })
+    .catch(() => {
+      // Background unavailable; leave badge hidden.
+    });
+}
+loadConflictBadge();
+
+// Clicking the badge opens the options page to review conflicts.
+conflictBadge.addEventListener('click', () => {
+  browser.runtime.openOptionsPage();
+});
+
 // Trigger manual sync
 syncBtn.addEventListener('click', () => {
   syncBtn.disabled = true;
@@ -28,6 +54,7 @@ syncBtn.addEventListener('click', () => {
     if (response?.status === 'ok') {
       statusEl.textContent = 'Sync complete';
       statusEl.title = '';
+      loadConflictBadge();
     } else {
       const detail = response?.message ?? 'Unknown error';
       statusEl.textContent = `Sync failed: ${detail}`;

@@ -12,7 +12,8 @@ import { mergeTrees, deduplicateTree } from '@/core/merge';
 import { computeSnapshotChecksum } from '@/core/checksum';
 import { isForceOverride } from '@/core/override';
 import { acquireLock, releaseLock } from './mutex';
-import { getSettings, getBaseSnapshot, saveBaseSnapshot, saveSyncStatus } from '@/config/store';
+import { getSettings, saveSettings, getBaseSnapshot, saveBaseSnapshot, saveSyncStatus, appendConflicts } from '@/config/store';
+import { isEncryptionSetup } from '@/config/key-manager';
 import { syncKeepAlive, markSyncInProgress } from '@/platform/sw-lifecycle';
 import { logger } from '@/utils/logger';
 
@@ -45,7 +46,19 @@ export async function runSync(trigger: SyncTrigger): Promise<void> {
     if (!settings) {
       throw new SyncError('No storage backend configured', 'NO_CONFIG');
     }
-    const backend = createStorageBackend(settings);
+
+    // Reconcile encryption state: if a key is persisted but the settings flag
+    // was not updated (race between initEncryption and saveSettings during
+    // setup, or an interrupted flow), auto-correct so sync can decrypt remote.
+    if (settings.encryption?.enabled !== false && await isEncryptionSetup()) {
+      if (!settings.encryption?.enabled) {
+        settings.encryption = { enabled: true };
+        await saveSettings(settings);
+        logger.info('Reconciled encryption flag: key exists, enabling in settings');
+      }
+    }
+
+    const backend = await createStorageBackend(settings);
 
     // Step 3: Download remote snapshot
     await updateStatus('DOWNLOADING');
@@ -73,9 +86,15 @@ export async function runSync(trigger: SyncTrigger): Promise<void> {
       // Normal merge
       await updateStatus('MERGING');
       const baseTree = await getBaseSnapshot();
-      mergedTree = mergeTrees(localTree, remoteSnapshot.tree, baseTree);
-      mergedTree = deduplicateTree(mergedTree);
+      const mergeResult = mergeTrees(localTree, remoteSnapshot.tree, baseTree);
+      mergedTree = deduplicateTree(mergeResult.tree);
       newRevision = Math.max(remoteSnapshot.revision, 0) + 1;
+
+      // Record true conflicts (non-blocking) for later user review.
+      if (mergeResult.conflicts.length > 0) {
+        await appendConflicts(mergeResult.conflicts);
+        logger.info(`Recorded ${mergeResult.conflicts.length} conflict(s) for review`);
+      }
       logger.info(`Merge complete: ${countNodes(mergedTree)} nodes, revision ${newRevision}`);
     }
 

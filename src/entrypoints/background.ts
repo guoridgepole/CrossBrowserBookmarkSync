@@ -1,18 +1,42 @@
 import { runSync } from '@/sync/engine';
-import { getSettings, getSyncStatus } from '@/config/store';
+import { getSettings, getSyncStatus, saveSettings, getConflicts, resolveConflict } from '@/config/store';
 import { recoverFromWAL } from '@/browser/bookmark-writer';
+import { findBrowserIdByStableId } from '@/browser/bookmark-reader';
 import { createStorageBackend } from '@/storage/factory';
 import { getRequiredOrigins } from '@/storage/origins';
 import { setupPeriodicSync, getPeriodicSyncAlarmName } from '@/platform/alarms';
 import { recordSWActivation, wasInterruptedMidSync } from '@/platform/sw-lifecycle';
+import {
+  initEncryption,
+  disableEncryption,
+  changePassword,
+  loadCipher,
+} from '@/config/key-manager';
+import { extractSalt } from '@/core/encryption';
 import { logger } from '@/utils/logger';
 import type { AppSettings } from '@/core/types';
+import { isRootFolder } from '@/core/types';
 
 /** Messages accepted from popup / options pages */
 interface ExtensionMessage {
-  type: 'TRIGGER_SYNC' | 'GET_STATUS' | 'TEST_CONNECTION';
+  type:
+    | 'TRIGGER_SYNC'
+    | 'GET_STATUS'
+    | 'TEST_CONNECTION'
+    | 'SETUP_ENCRYPTION'
+    | 'DISABLE_ENCRYPTION'
+    | 'CHANGE_PASSWORD'
+    | 'GET_CONFLICTS'
+    | 'RESOLVE_CONFLICT';
   /** Optional config payload for TEST_CONNECTION (test current form values) */
   config?: AppSettings;
+  /** Password payloads for encryption management */
+  password?: string;
+  oldPassword?: string;
+  newPassword?: string;
+  /** Conflict resolution payloads */
+  stableId?: string;
+  choice?: 'local' | 'remote';
 }
 
 /** Debounce delay for bookmark-change-triggered sync (ms) */
@@ -48,6 +72,41 @@ export default defineBackground(() => {
 
       if (message.type === 'TEST_CONNECTION') {
         testConnection(message.config)
+          .then((result) => sendResponse(result))
+          .catch((err) => sendResponse({ success: false, error: String(err) }));
+        return true;
+      }
+
+      if (message.type === 'SETUP_ENCRYPTION') {
+        setupEncryption(message.password ?? '')
+          .then((result) => sendResponse(result))
+          .catch((err) => sendResponse({ success: false, error: String(err) }));
+        return true;
+      }
+
+      if (message.type === 'DISABLE_ENCRYPTION') {
+        disableEncryptionFlow()
+          .then((result) => sendResponse(result))
+          .catch((err) => sendResponse({ success: false, error: String(err) }));
+        return true;
+      }
+
+      if (message.type === 'CHANGE_PASSWORD') {
+        changePasswordFlow(message.oldPassword ?? '', message.newPassword ?? '')
+          .then((result) => sendResponse(result))
+          .catch((err) => sendResponse({ success: false, error: String(err) }));
+        return true;
+      }
+
+      if (message.type === 'GET_CONFLICTS') {
+        getConflicts()
+          .then((conflicts) => sendResponse({ status: 'ok', conflicts }))
+          .catch((err) => sendResponse({ status: 'error', message: String(err) }));
+        return true;
+      }
+
+      if (message.type === 'RESOLVE_CONFLICT') {
+        resolveConflictFlow(message.stableId ?? '', message.choice ?? 'local')
           .then((result) => sendResponse(result))
           .catch((err) => sendResponse({ success: false, error: String(err) }));
         return true;
@@ -159,11 +218,202 @@ async function testConnection(config?: AppSettings): Promise<{ success: boolean;
       }
     }
 
-    const backend = createStorageBackend(settings);
+    const backend = await createStorageBackend(settings);
     await backend.testConnection();
     return { success: true };
   } catch (err) {
     logger.error(`Connection test failed: ${err}`);
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Enable end-to-end encryption: derive + persist a key from the master password,
+ * reusing the remote salt if data is already encrypted (multi-device), and
+ * migrate any existing plaintext snapshot to encrypted form.
+ */
+async function setupEncryption(
+  password: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!password) {
+      return { success: false, error: 'Master password is required' };
+    }
+    const settings = await getSettings();
+    if (!settings) {
+      return { success: false, error: 'No storage backend configured' };
+    }
+
+    // Probe the remote object without a cipher to inspect its raw body.
+    const plainBackend = await createStorageBackend({
+      ...settings,
+      encryption: undefined,
+    });
+    const raw = await plainBackend.peekRawSnapshot();
+    const existingSalt = raw ? extractSalt(raw) : null;
+
+    // Derive and persist the key (reuse remote salt so all devices match).
+    await initEncryption(password, existingSalt ?? undefined);
+
+    // Persist the encryption flag IMMEDIATELY after the key is stored.
+    // This eliminates the race window where a concurrent sync (alarm, bookmark
+    // change) would see the old flag and fail on encrypted remote data.
+    // A backend with a cipher handles both plaintext and encrypted downloads
+    // transparently, so this is safe even before migration completes.
+    settings.encryption = { enabled: true };
+    await saveSettings(settings);
+
+    if (existingSalt && raw) {
+      // Remote is already encrypted: verify this password can decrypt it.
+      const cipher = await loadCipher();
+      try {
+        await cipher.decrypt(raw);
+      } catch {
+        // Wrong password: roll back the key AND the settings flag.
+        await disableEncryption();
+        settings.encryption = { enabled: false };
+        await saveSettings(settings);
+        return {
+          success: false,
+          error: 'Wrong master password: cannot decrypt the existing encrypted data.',
+        };
+      }
+    } else if (raw) {
+      // Remote is plaintext: migrate by re-uploading it encrypted.
+      const snapshot = await plainBackend.download();
+      if (snapshot) {
+        const encBackend = await createStorageBackend({
+          ...settings,
+          encryption: { enabled: true },
+        });
+        await encBackend.upload(snapshot);
+      }
+    }
+
+    logger.info('Encryption enabled');
+    return { success: true };
+  } catch (err) {
+    logger.error(`Setup encryption failed: ${err}`);
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Disable encryption: download the (encrypted) snapshot while the key still
+ * exists, remove key material, then re-upload the snapshot as plaintext.
+ */
+async function disableEncryptionFlow(): Promise<{ success: boolean; error?: string }> {
+  try {
+    const settings = await getSettings();
+    if (!settings) {
+      return { success: false, error: 'No storage backend configured' };
+    }
+    const encBackend = await createStorageBackend(settings);
+    const snapshot = await encBackend.download();
+
+    await disableEncryption();
+
+    if (snapshot) {
+      const plainBackend = await createStorageBackend({
+        ...settings,
+        encryption: undefined,
+      });
+      await plainBackend.upload(snapshot);
+    }
+
+    settings.encryption = { enabled: false };
+    await saveSettings(settings);
+    logger.info('Encryption disabled');
+    return { success: true };
+  } catch (err) {
+    logger.error(`Disable encryption failed: ${err}`);
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Change the master password: download with the current key, re-derive the key
+ * from the new password (same salt), then re-upload re-encrypted with the new key.
+ */
+async function changePasswordFlow(
+  oldPassword: string,
+  newPassword: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!newPassword) {
+      return { success: false, error: 'New master password is required' };
+    }
+    const settings = await getSettings();
+    if (!settings) {
+      return { success: false, error: 'No storage backend configured' };
+    }
+    // Download with the CURRENT (old) key before rotating.
+    const oldBackend = await createStorageBackend(settings);
+    const snapshot = await oldBackend.download();
+
+    // Throws if the old password is incorrect.
+    await changePassword(oldPassword, newPassword);
+
+    // Re-upload with the NEW key.
+    if (snapshot) {
+      const newBackend = await createStorageBackend(settings);
+      await newBackend.upload(snapshot);
+    }
+    logger.info('Master password changed');
+    return { success: true };
+  } catch (err) {
+    logger.error(`Change password failed: ${err}`);
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Resolve a recorded merge conflict by keeping the user's chosen version.
+ * Locates the live browser bookmark by stableId, updates it to the chosen
+ * title/url, marks the conflict resolved, then triggers a sync to propagate
+ * the decision to other devices.
+ */
+async function resolveConflictFlow(
+  stableId: string,
+  choice: 'local' | 'remote',
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!stableId) {
+      return { success: false, error: 'stableId is required' };
+    }
+    const conflicts = await getConflicts();
+    const conflict = conflicts.find((c) => c.stableId === stableId && !c.resolved);
+    if (!conflict) {
+      return { success: false, error: 'Conflict not found or already resolved' };
+    }
+
+    const chosen = choice === 'local' ? conflict.local : conflict.remote;
+
+    // Apply the chosen version to the live browser bookmark (if it still exists).
+    // Root folders are browser-managed and cannot be updated via the API.
+    const browserId = isRootFolder(stableId) ? null : await findBrowserIdByStableId(stableId);
+    if (browserId) {
+      const changes: { title: string; url?: string } = { title: chosen.title };
+      if (chosen.type === 'bookmark' && chosen.url) {
+        changes.url = chosen.url;
+      }
+      await browser.bookmarks.update(browserId, changes);
+    } else if (!isRootFolder(stableId)) {
+      logger.info(`Bookmark for conflict ${stableId} no longer exists locally; marking resolved only`);
+    }
+
+    await resolveConflict(stableId, choice);
+    logger.info(`Conflict ${stableId} resolved, keeping ${choice} version`);
+
+    // Propagate the resolution; a failure here does not undo the local resolve.
+    try {
+      await runSync('manual');
+    } catch (err) {
+      logger.error(`Post-resolve sync failed: ${err}`);
+    }
+    return { success: true };
+  } catch (err) {
+    logger.error(`Resolve conflict failed: ${err}`);
     return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }

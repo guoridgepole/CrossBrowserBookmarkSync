@@ -11,6 +11,7 @@ import { AwsClient } from 'aws4fetch';
 import type { S3Config, SyncSnapshot } from '@/core/types';
 import { StorageError } from '@/core/types';
 import { serializeSnapshot, deserializeSnapshot } from '@/core/serializer';
+import { isEncryptedBody, type Cipher } from '@/core/encryption';
 import type { IStorageBackend } from './types';
 
 const DEFAULT_KEY = 'bookmark-sync/snapshot.json';
@@ -33,7 +34,10 @@ export class S3Backend implements IStorageBackend {
   private objectKey: string;
   private baseUrl: string;
 
-  constructor(private config: S3Config) {
+  constructor(
+    private config: S3Config,
+    private cipher?: Cipher,
+  ) {
     this.client = new AwsClient({
       accessKeyId: config.accessKeyId,
       secretAccessKey: config.secretAccessKey,
@@ -45,6 +49,46 @@ export class S3Backend implements IStorageBackend {
     });
     this.objectKey = config.key || DEFAULT_KEY;
     this.baseUrl = this.buildBaseUrl();
+  }
+
+  /** Serialize a snapshot, encrypting when a cipher is configured. */
+  private async serializeBody(snapshot: SyncSnapshot): Promise<string> {
+    const json = serializeSnapshot(snapshot);
+    return this.cipher ? this.cipher.encrypt(json) : json;
+  }
+
+  /** Parse a remote body, decrypting if it is an encrypted envelope.
+   * `sourceUrl` is included in errors so misconfigured endpoints/keys (or
+   * leftover remote objects) can be identified at a glance. */
+  private async parseBody(text: string, sourceUrl: string): Promise<SyncSnapshot> {
+    let json = text;
+    if (isEncryptedBody(text)) {
+      if (!this.cipher) {
+        throw new StorageError(
+          'Remote data is encrypted but encryption is disabled on this device. ' +
+            'Enable encryption using the same master password. ' +
+            `(Encrypted object found at: ${sourceUrl})`,
+          'DECRYPT_FAILED',
+        );
+      }
+      try {
+        json = await this.cipher.decrypt(text);
+      } catch (err) {
+        throw new StorageError(
+          `Failed to decrypt remote snapshot (${err instanceof Error ? err.message : 'error'}). ` +
+            'Wrong master password?',
+          'DECRYPT_FAILED',
+        );
+      }
+    }
+    try {
+      return deserializeSnapshot(json);
+    } catch (error) {
+      throw new StorageError(
+        `Failed to parse remote snapshot: ${error}`,
+        'PARSE_ERROR',
+      );
+    }
   }
 
   /**
@@ -78,7 +122,7 @@ export class S3Backend implements IStorageBackend {
   }
 
   async upload(snapshot: SyncSnapshot): Promise<void> {
-    const body = serializeSnapshot(snapshot);
+    const body = await this.serializeBody(snapshot);
 
     const response = await this.client.fetch(this.objectUrl, {
       method: 'PUT',
@@ -114,14 +158,12 @@ export class S3Backend implements IStorageBackend {
     }
 
     const text = await response.text();
-    try {
-      return deserializeSnapshot(text);
-    } catch (error) {
-      throw new StorageError(
-        `Failed to parse remote snapshot: ${error}`,
-        'PARSE_ERROR',
-      );
+    // Some gateways/proxies answer a missing object with 200 + empty body;
+    // treat that as "no remote data" just like a 404.
+    if (!text.trim()) {
+      return null;
     }
+    return this.parseBody(text, this.objectUrl);
   }
 
   async delete(): Promise<void> {
@@ -190,7 +232,7 @@ export class S3Backend implements IStorageBackend {
   }
 
   async uploadBackup(snapshot: SyncSnapshot, timestamp: number): Promise<void> {
-    const body = serializeSnapshot(snapshot);
+    const body = await this.serializeBody(snapshot);
 
     const response = await this.client.fetch(this.backupUrl(timestamp), {
       method: 'PUT',
@@ -225,6 +267,24 @@ export class S3Backend implements IStorageBackend {
     }
 
     const text = await response.text();
-    return deserializeSnapshot(text);
+    if (!text.trim()) {
+      return null;
+    }
+    return this.parseBody(text, this.backupUrl(timestamp));
+  }
+
+  async peekRawSnapshot(): Promise<string | null> {
+    const response = await this.client.fetch(this.objectUrl, { method: 'GET' });
+    if (response.status === 404 || response.status === 403) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new StorageError(
+        `S3 peek failed: ${response.status} ${response.statusText}`,
+        'DOWNLOAD_FAILED',
+        response.status,
+      );
+    }
+    return response.text();
   }
 }

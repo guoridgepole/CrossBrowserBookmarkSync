@@ -16,9 +16,9 @@ describe('mergeTrees', () => {
     const remote: BookmarkNode[] = [];
     const base: BookmarkNode[] = [];
 
-    const merged = mergeTrees(local, remote, base);
+    const { tree: merged } = mergeTrees(local, remote, base);
     expect(merged).toHaveLength(1);
-    expect(merged[0].stableId).toBe('b1');
+    expect(merged[0]!.stableId).toBe('b1');
   });
 
   it('should include nodes only on remote side (new additions)', () => {
@@ -26,9 +26,9 @@ describe('mergeTrees', () => {
     const remote = [bm('b2', 'Remote Only', 'https://remote.com')];
     const base: BookmarkNode[] = [];
 
-    const merged = mergeTrees(local, remote, base);
+    const { tree: merged } = mergeTrees(local, remote, base);
     expect(merged).toHaveLength(1);
-    expect(merged[0].stableId).toBe('b2');
+    expect(merged[0]!.stableId).toBe('b2');
   });
 
   it('should take newer version on conflict (LWW)', () => {
@@ -36,9 +36,9 @@ describe('mergeTrees', () => {
     const remote = [bm('b1', 'New Title', 'https://example.com', 2000)];
     const base = [bm('b1', 'Old Title', 'https://example.com', 1000)];
 
-    const merged = mergeTrees(local, remote, base);
+    const { tree: merged } = mergeTrees(local, remote, base);
     expect(merged).toHaveLength(1);
-    expect(merged[0].title).toBe('New Title');
+    expect(merged[0]!.title).toBe('New Title');
   });
 
   it('should propagate deletion when other side unmodified', () => {
@@ -46,7 +46,7 @@ describe('mergeTrees', () => {
     const remote = [bm('b1', 'Test', 'https://example.com', 1000)];
     const base = [bm('b1', 'Test', 'https://example.com', 1000)];
 
-    const merged = mergeTrees(local, remote, base);
+    const { tree: merged } = mergeTrees(local, remote, base);
     expect(merged).toHaveLength(0);
   });
 
@@ -55,13 +55,13 @@ describe('mergeTrees', () => {
     const remote = [bm('b1', 'Modified', 'https://example.com', 2000)];
     const base = [bm('b1', 'Original', 'https://example.com', 1000)];
 
-    const merged = mergeTrees(local, remote, base);
+    const { tree: merged } = mergeTrees(local, remote, base);
     expect(merged).toHaveLength(1);
-    expect(merged[0].title).toBe('Modified');
+    expect(merged[0]!.title).toBe('Modified');
   });
 
   it('should handle both sides empty', () => {
-    const merged = mergeTrees([], [], []);
+    const { tree: merged } = mergeTrees([], [], []);
     expect(merged).toHaveLength(0);
   });
 
@@ -74,7 +74,7 @@ describe('mergeTrees', () => {
     ];
     const base = [folder('f1', 'Work', [])];
 
-    const merged = mergeTrees(local, remote, base);
+    const { tree: merged } = mergeTrees(local, remote, base);
     expect(merged).toHaveLength(1);
     // Both bookmarks should be present
     const allIds = new Set<string>();
@@ -101,7 +101,7 @@ describe('deduplicateTree', () => {
     const bookmarks = deduped.filter((n) => n.type === 'bookmark');
     expect(bookmarks).toHaveLength(1);
     // Should keep the newer one
-    expect(bookmarks[0].lastModified).toBe(2000);
+    expect(bookmarks[0]!.lastModified).toBe(2000);
   });
 
   it('should merge folders with same title', () => {
@@ -113,7 +113,7 @@ describe('deduplicateTree', () => {
     const deduped = deduplicateTree(tree);
     const folders = deduped.filter((n) => n.type === 'folder');
     expect(folders).toHaveLength(1);
-    expect(folders[0].children).toHaveLength(2);
+    expect(folders[0]!.children).toHaveLength(2);
   });
 
   it('should not deduplicate different URLs', () => {
@@ -135,6 +135,91 @@ describe('deduplicateTree', () => {
     ];
 
     const deduped = deduplicateTree(tree);
-    expect(deduped[0].children).toHaveLength(1);
+    expect(deduped[0]!.children).toHaveLength(1);
+  });
+});
+
+describe('mergeTrees - conflict detection', () => {
+  it('should record a conflict when both sides modified with different content', () => {
+    const base = [bm('b1', 'Original', 'https://example.com', 1000)];
+    const local = [bm('b1', 'Local Edit', 'https://example.com', 2000)];
+    const remote = [bm('b1', 'Remote Edit', 'https://example.com', 3000)];
+
+    const { tree, conflicts } = mergeTrees(local, remote, base);
+
+    // LWW still produces a merged tree (non-blocking).
+    expect(tree).toHaveLength(1);
+    expect(tree[0]!.title).toBe('Remote Edit');
+
+    // The true conflict is recorded for review.
+    expect(conflicts).toHaveLength(1);
+    const conflict = conflicts[0]!;
+    expect(conflict.stableId).toBe('b1');
+    expect(conflict.type).toBe('bookmark');
+    expect(conflict.local.title).toBe('Local Edit');
+    expect(conflict.remote.title).toBe('Remote Edit');
+    expect(conflict.base?.title).toBe('Original');
+    expect(conflict.autoChosen).toBe('remote'); // remote is newer
+    expect(conflict.resolved).toBe(false);
+  });
+
+  it('should pick autoChosen=local when local is newer', () => {
+    const base = [bm('b1', 'Original', 'https://example.com', 1000)];
+    const local = [bm('b1', 'Local Edit', 'https://example.com', 3000)];
+    const remote = [bm('b1', 'Remote Edit', 'https://example.com', 2000)];
+
+    const { conflicts } = mergeTrees(local, remote, base);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]!.autoChosen).toBe('local');
+  });
+
+  it('should not record a conflict when only one side modified', () => {
+    const base = [bm('b1', 'Original', 'https://example.com', 1000)];
+    const local = [bm('b1', 'Original', 'https://example.com', 1000)]; // unchanged
+    const remote = [bm('b1', 'Remote Edit', 'https://example.com', 2000)];
+
+    const { tree, conflicts } = mergeTrees(local, remote, base);
+    expect(tree[0]!.title).toBe('Remote Edit');
+    expect(conflicts).toHaveLength(0);
+  });
+
+  it('should not record a conflict when both sides made the same edit', () => {
+    const base = [bm('b1', 'Original', 'https://example.com', 1000)];
+    const local = [bm('b1', 'Same Edit', 'https://example.com', 2000)];
+    const remote = [bm('b1', 'Same Edit', 'https://example.com', 2500)];
+
+    const { conflicts } = mergeTrees(local, remote, base);
+    expect(conflicts).toHaveLength(0);
+  });
+
+  it('should treat a URL-only difference as a conflict', () => {
+    const base = [bm('b1', 'Site', 'https://old.com', 1000)];
+    const local = [bm('b1', 'Site', 'https://local.com', 2000)];
+    const remote = [bm('b1', 'Site', 'https://remote.com', 3000)];
+
+    const { conflicts } = mergeTrees(local, remote, base);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]!.autoChosen).toBe('remote');
+  });
+
+  it('should record a folder conflict on differing titles', () => {
+    const base = [folder('f1', 'Work', [], 1000)];
+    const local = [folder('f1', 'Work Local', [], 2000)];
+    const remote = [folder('f1', 'Work Remote', [], 3000)];
+
+    const { tree, conflicts } = mergeTrees(local, remote, base);
+    expect(tree[0]!.title).toBe('Work Remote');
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]!.type).toBe('folder');
+    expect(conflicts[0]!.autoChosen).toBe('remote');
+  });
+
+  it('should not record a conflict without a base (first merge additions)', () => {
+    const base: BookmarkNode[] = [];
+    const local = [bm('b1', 'Same', 'https://same.com')];
+    const remote = [bm('b1', 'Same', 'https://same.com')];
+
+    const { conflicts } = mergeTrees(local, remote, base);
+    expect(conflicts).toHaveLength(0);
   });
 });

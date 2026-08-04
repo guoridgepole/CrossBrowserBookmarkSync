@@ -70,3 +70,23 @@ button:disabled {
 .btn-secondary:hover {
   background: #d8d8d8;
 }
+
+.hidden {
+  display: none;
+}
+
+.conflict-badge {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #fff4e5;
+  color: #b7791f;
+  border: 1px solid #f6ad55;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: center;
+  cursor: pointer;
+}
+
+.conflict-badge:hover {
+  background: #feebc8;
+}

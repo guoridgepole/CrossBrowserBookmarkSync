@@ -30,4 +30,11 @@ export interface IStorageBackend {
 
   /** Download a specific backup by timestamp */
   downloadBackup(timestamp: number): Promise<SyncSnapshot | null>;
+
+  /**
+   * Fetch the raw main snapshot body WITHOUT deserializing or decrypting.
+   * Returns null if no object exists. Used to probe for an existing encrypted
+   * envelope (to read its salt) and to detect plaintext data needing migration.
+   */
+  peekRawSnapshot(): Promise<string | null>;
 }

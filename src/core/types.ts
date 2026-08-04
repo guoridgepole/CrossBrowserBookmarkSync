@@ -187,12 +187,48 @@ export interface S3Config {
 
 export type BackendType = 'webdav' | 's3';
 
+/** End-to-end encryption settings for the remote snapshot. */
+export interface EncryptionSettings {
+  /** Whether remote snapshots are encrypted client-side before upload. */
+  enabled: boolean;
+}
+
 export interface AppSettings {
   backendType: BackendType;
   webdav?: WebDavConfig;
   s3?: S3Config;
   syncIntervalMinutes: number;
   deviceId: string;
+  encryption?: EncryptionSettings;
+}
+
+/**
+ * A true merge conflict: the same node was modified on both the local and
+ * remote side since the last common base, with differing content. The sync
+ * engine auto-resolves it via Last-Write-Wins (non-blocking) but records it so
+ * the user can review and override the choice afterwards.
+ */
+export interface SyncConflict {
+  /** Stable ID of the conflicting node */
+  stableId: string;
+  /** Node type */
+  type: NodeType;
+  /** Display title (of the auto-chosen version) */
+  title: string;
+  /** URL (bookmark only) */
+  url?: string;
+  /** The local version of the node */
+  local: BookmarkNode;
+  /** The remote version of the node */
+  remote: BookmarkNode;
+  /** The common base version, if known */
+  base?: BookmarkNode;
+  /** Which version Last-Write-Wins automatically applied */
+  autoChosen: 'local' | 'remote';
+  /** When the conflict was detected (Unix ms) */
+  timestamp: number;
+  /** Whether the user has resolved this conflict */
+  resolved: boolean;
 }
 
 /** Custom error types */

@@ -161,6 +161,25 @@ describe('S3Backend', () => {
 
       await expect(backend.download()).rejects.toThrow(StorageError);
     });
+
+    it('should return null on 200 with empty body (proxy quirk)', async () => {
+      const backend = new S3Backend(makeConfig());
+      mockFetch.mockResolvedValue(new Response('   ', { status: 200 }));
+
+      const result = await backend.download();
+      expect(result).toBeNull();
+    });
+
+    it('should include the remote URL when body is encrypted but no cipher', async () => {
+      const backend = new S3Backend(makeConfig());
+      mockFetch.mockResolvedValue(
+        jsonResponse({ enc: 1, alg: 'AES-GCM-256', kdf: 'PBKDF2-SHA256', iter: 1, salt: 'x', iv: 'y', data: 'z' }),
+      );
+
+      await expect(backend.download()).rejects.toThrow(
+        /Encrypted object found at: https:\/\/test-bucket\.s3\.us-east-1\.amazonaws\.com\//,
+      );
+    });
   });
 
   describe('delete', () => {

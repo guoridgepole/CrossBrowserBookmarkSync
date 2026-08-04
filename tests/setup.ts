@@ -1,4 +1,4 @@
-import { vi } from 'vitest';
+import { vi, beforeEach } from 'vitest';
 import { fakeBrowser } from '@webext-core/fake-browser';
 
 // Make fake browser available globally as `browser` and `chrome`
