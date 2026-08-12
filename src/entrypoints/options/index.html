@@ -3,17 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CrossBrowserBookmarkSync - Settings</title>
+    <title data-i18n="options.title">CrossBrowserBookmarkSync - Settings</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <div class="container">
-      <h1>CrossBrowserBookmarkSync Settings</h1>
+      <div class="lang-bar">
+        <label for="language-select" data-i18n="lang.label">Language</label>
+        <select id="language-select">
+          <option value="en">English</option>
+          <option value="zh">简体中文</option>
+        </select>
+      </div>
+
+      <h1 data-i18n="options.h1">CrossBrowserBookmarkSync Settings</h1>
 
       <section class="section">
-        <h2>Storage Backend</h2>
+        <h2 data-i18n="options.storageBackend">Storage Backend</h2>
         <div class="form-group">
-          <label for="backend-type">Backend Type</label>
+          <label for="backend-type" data-i18n="options.backendType">Backend Type</label>
           <select id="backend-type">
             <option value="webdav">WebDAV</option>
             <option value="s3">S3</option>
@@ -22,114 +30,114 @@
 
         <div id="webdav-config">
           <div class="form-group">
-            <label for="webdav-url">WebDAV URL</label>
+            <label for="webdav-url" data-i18n="options.webdavUrl">WebDAV URL</label>
             <input type="url" id="webdav-url" placeholder="https://dav.example.com/bookmarks/" />
           </div>
           <div class="form-group">
-            <label for="webdav-username">Username</label>
-            <input type="text" id="webdav-username" placeholder="username" />
+            <label for="webdav-username" data-i18n="options.username">Username</label>
+            <input type="text" id="webdav-username" data-i18n-placeholder="ph.username" placeholder="username" />
           </div>
           <div class="form-group">
-            <label for="webdav-password">Password</label>
-            <input type="password" id="webdav-password" placeholder="password" />
+            <label for="webdav-password" data-i18n="options.password">Password</label>
+            <input type="password" id="webdav-password" data-i18n-placeholder="ph.password" placeholder="password" />
           </div>
         </div>
 
         <div id="s3-config" class="hidden">
           <div class="form-group">
-            <label for="s3-endpoint">Endpoint URL</label>
+            <label for="s3-endpoint" data-i18n="options.s3Endpoint">Endpoint URL</label>
             <input type="url" id="s3-endpoint" placeholder="https://s3.amazonaws.com" />
           </div>
           <div class="form-group">
-            <label for="s3-bucket">Bucket</label>
+            <label for="s3-bucket" data-i18n="options.s3Bucket">Bucket</label>
             <input type="text" id="s3-bucket" placeholder="my-bookmarks" />
           </div>
           <div class="form-group">
-            <label for="s3-region">Region</label>
+            <label for="s3-region" data-i18n="options.s3Region">Region</label>
             <input type="text" id="s3-region" placeholder="us-east-1" />
           </div>
           <div class="form-group">
-            <label for="s3-access-key">Access Key ID</label>
+            <label for="s3-access-key" data-i18n="options.s3AccessKey">Access Key ID</label>
             <input type="text" id="s3-access-key" placeholder="AKIA..." />
           </div>
           <div class="form-group">
-            <label for="s3-secret-key">Secret Access Key</label>
-            <input type="password" id="s3-secret-key" placeholder="secret" />
+            <label for="s3-secret-key" data-i18n="options.s3SecretKey">Secret Access Key</label>
+            <input type="password" id="s3-secret-key" data-i18n-placeholder="ph.password" placeholder="secret" />
           </div>
           <div class="form-group checkbox-group">
             <label for="s3-path-style">
               <input type="checkbox" id="s3-path-style" />
-              <span>Path-style endpoint (enable for MinIO / self-hosted; leave off for AWS, Tencent COS, Cloudflare R2)</span>
+              <span data-i18n="options.pathStyle">Path-style endpoint (enable for MinIO / self-hosted; leave off for AWS, Tencent COS, Cloudflare R2)</span>
             </label>
           </div>
         </div>
       </section>
 
       <section class="section">
-        <h2>Sync Schedule</h2>
+        <h2 data-i18n="options.syncSchedule">Sync Schedule</h2>
         <div class="form-group">
-          <label for="sync-interval">Sync Interval</label>
+          <label for="sync-interval" data-i18n="options.syncInterval">Sync Interval</label>
           <select id="sync-interval">
-            <option value="5">Every 5 minutes</option>
-            <option value="15">Every 15 minutes</option>
-            <option value="30" selected>Every 30 minutes</option>
-            <option value="60">Every hour</option>
-            <option value="360">Every 6 hours</option>
-            <option value="720">Every 12 hours</option>
-            <option value="1440">Every 24 hours</option>
+            <option value="5" data-i18n="options.interval5">Every 5 minutes</option>
+            <option value="15" data-i18n="options.interval15">Every 15 minutes</option>
+            <option value="30" selected data-i18n="options.interval30">Every 30 minutes</option>
+            <option value="60" data-i18n="options.interval60">Every hour</option>
+            <option value="360" data-i18n="options.interval360">Every 6 hours</option>
+            <option value="720" data-i18n="options.interval720">Every 12 hours</option>
+            <option value="1440" data-i18n="options.interval1440">Every 24 hours</option>
           </select>
         </div>
       </section>
 
       <section class="section">
-        <h2>Encryption</h2>
-        <p class="hint">
+        <h2 data-i18n="options.encryption">Encryption</h2>
+        <p class="hint" data-i18n="options.encryptionHint">
           Encrypt bookmarks end-to-end before uploading, so your storage provider
           only ever sees ciphertext. All devices must use the same master password.
         </p>
 
         <div id="encryption-off">
           <div class="form-group">
-            <label for="enc-password">Master Password</label>
-            <input type="password" id="enc-password" placeholder="master password" />
+            <label for="enc-password" data-i18n="options.masterPassword">Master Password</label>
+            <input type="password" id="enc-password" data-i18n-placeholder="ph.masterPassword" placeholder="master password" />
           </div>
           <div class="form-group">
-            <label for="enc-password-confirm">Confirm Password</label>
-            <input type="password" id="enc-password-confirm" placeholder="repeat password" />
+            <label for="enc-password-confirm" data-i18n="options.confirmPassword">Confirm Password</label>
+            <input type="password" id="enc-password-confirm" data-i18n-placeholder="ph.repeatPassword" placeholder="repeat password" />
           </div>
-          <button id="enable-encryption-btn" class="btn-secondary">Enable Encryption</button>
+          <button id="enable-encryption-btn" class="btn-secondary" data-i18n="options.enableEncryption">Enable Encryption</button>
         </div>
 
         <div id="encryption-on" class="hidden">
-          <p class="hint success-text">Encryption is enabled on this device.</p>
+          <p class="hint success-text" data-i18n="options.encryptionEnabled">Encryption is enabled on this device.</p>
           <div class="form-group">
-            <label for="enc-old-password">Current Password</label>
-            <input type="password" id="enc-old-password" placeholder="current password" />
+            <label for="enc-old-password" data-i18n="options.currentPassword">Current Password</label>
+            <input type="password" id="enc-old-password" data-i18n-placeholder="ph.currentPassword" placeholder="current password" />
           </div>
           <div class="form-group">
-            <label for="enc-new-password">New Password</label>
-            <input type="password" id="enc-new-password" placeholder="new password" />
+            <label for="enc-new-password" data-i18n="options.newPassword">New Password</label>
+            <input type="password" id="enc-new-password" data-i18n-placeholder="ph.newPassword" placeholder="new password" />
           </div>
           <div class="actions">
-            <button id="change-password-btn" class="btn-secondary">Change Password</button>
-            <button id="disable-encryption-btn" class="btn-secondary">Disable Encryption</button>
+            <button id="change-password-btn" class="btn-secondary" data-i18n="options.changePassword">Change Password</button>
+            <button id="disable-encryption-btn" class="btn-secondary" data-i18n="options.disableEncryption">Disable Encryption</button>
           </div>
         </div>
       </section>
 
       <section class="section">
-        <h2>Conflicts</h2>
-        <p class="hint">
+        <h2 data-i18n="options.conflicts">Conflicts</h2>
+        <p class="hint" data-i18n="options.conflictsHint">
           When the same bookmark is edited on two devices before they sync, the
           newer edit wins automatically and the conflict is listed here for review.
         </p>
-        <div id="conflicts-empty" class="hint success-text">No unresolved conflicts.</div>
+        <div id="conflicts-empty" class="hint success-text" data-i18n="options.noConflicts">No unresolved conflicts.</div>
         <div id="conflicts-list"></div>
       </section>
 
       <div class="actions">
-        <button id="test-btn" class="btn-secondary">Test Connection</button>
-        <button id="save-btn" class="btn-primary">Save Settings</button>
+        <button id="test-btn" class="btn-secondary" data-i18n="options.testConnection">Test Connection</button>
+        <button id="save-btn" class="btn-primary" data-i18n="options.saveSettings">Save Settings</button>
       </div>
       <div id="message" class="message hidden"></div>
     </div>

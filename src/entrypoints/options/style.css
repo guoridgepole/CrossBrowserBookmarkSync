@@ -22,6 +22,25 @@ body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
+.lang-bar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.lang-bar label {
+  margin-bottom: 0;
+}
+
+.lang-bar select {
+  width: auto;
+  padding: 4px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 h1 {
   font-size: 22px;
   font-weight: 600;

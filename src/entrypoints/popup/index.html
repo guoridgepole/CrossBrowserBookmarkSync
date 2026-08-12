@@ -8,14 +8,21 @@
   </head>
   <body>
     <div class="container">
+      <div class="lang-bar">
+        <select id="language-select" aria-label="Language">
+          <option value="en">English</option>
+          <option value="zh">简体中文</option>
+        </select>
+      </div>
       <h1>CrossBrowserBookmarkSync</h1>
-      <div id="status" class="status">Idle</div>
+      <div id="status" class="status" data-i18n="state.IDLE">Idle</div>
       <div id="last-sync" class="last-sync"></div>
       <div id="conflict-badge" class="conflict-badge hidden">
-        <span id="conflict-count">0</span> conflict(s) need review
+        <span id="conflict-count">0</span>
+        <span data-i18n="popup.conflictText">conflict(s) need review</span>
       </div>
-      <button id="sync-btn" class="btn-primary">Sync Now</button>
-      <button id="options-btn" class="btn-secondary">Settings</button>
+      <button id="sync-btn" class="btn-primary" data-i18n="popup.syncNow">Sync Now</button>
+      <button id="options-btn" class="btn-secondary" data-i18n="popup.settings">Settings</button>
     </div>
     <script type="module" src="./main.ts"></script>
   </body>

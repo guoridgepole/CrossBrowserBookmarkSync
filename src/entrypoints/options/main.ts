@@ -5,7 +5,9 @@
 import type { AppSettings, BackendType, BookmarkNode, SyncConflict } from '@/core/types';
 import { getSettings, saveSettings } from '@/config/store';
 import { getRequiredOrigins } from '@/storage/origins';
+import { initI18n, initLanguageSelect, t } from '@/utils/i18n';
 
+const languageSelect = document.getElementById('language-select') as HTMLSelectElement;
 const backendType = document.getElementById('backend-type') as HTMLSelectElement;
 const webdavConfig = document.getElementById('webdav-config')!;
 const s3Config = document.getElementById('s3-config')!;
@@ -93,10 +95,10 @@ async function loadSettings(): Promise<void> {
 function readFormSettings(): AppSettings | string {
   const type = backendType.value as BackendType;
   if (type === 'webdav' && !inputs.webdavUrl.value.trim()) {
-    return 'Please enter a WebDAV URL';
+    return t('msg.webdavUrlRequired');
   }
   if (type === 's3' && (!inputs.s3Bucket.value.trim() || !inputs.s3AccessKey.value.trim())) {
-    return 'Please enter S3 bucket and access key';
+    return t('msg.s3Required');
   }
 
   const settings: AppSettings = {
@@ -143,11 +145,11 @@ async function ensureHostPermissions(origins: string[]): Promise<boolean> {
   try {
     const granted = await browser.permissions.request({ origins });
     if (!granted) {
-      showMessage('Host permission denied. The extension cannot reach your storage without it.', 'error');
+      showMessage(t('msg.hostPermissionDenied'), 'error');
     }
     return granted;
   } catch (err) {
-    showMessage(`Permission request failed: ${err}`, 'error');
+    showMessage(t('msg.permissionFailed', { detail: String(err) }), 'error');
     return false;
   }
 }
@@ -174,7 +176,7 @@ saveBtn.addEventListener('click', async () => {
     encryption: existing?.encryption,
   };
   await saveSettings(settings);
-  showMessage('Settings saved! Periodic sync schedule updated.', 'success');
+  showMessage(t('msg.settingsSaved'), 'success');
 });
 
 // Test connection using the CURRENT form values (no need to save first).
@@ -191,7 +193,7 @@ testBtn.addEventListener('click', async () => {
     return;
   }
 
-  showMessage('Testing connection...', 'info');
+  showMessage(t('msg.testing'), 'info');
   testBtn.setAttribute('disabled', 'true');
 
   try {
@@ -200,12 +202,15 @@ testBtn.addEventListener('click', async () => {
       config: formSettings,
     })) as { success?: boolean; error?: string } | undefined;
     if (response?.success) {
-      showMessage('Connection successful!', 'success');
+      showMessage(t('msg.connectionOk'), 'success');
     } else {
-      showMessage(`Connection failed: ${response?.error ?? 'Unknown error'}`, 'error');
+      showMessage(
+        t('msg.connectionFailed', { detail: response?.error ?? t('common.unknownError') }),
+        'error',
+      );
     }
   } catch (err) {
-    showMessage(`Connection test error: ${err}`, 'error');
+    showMessage(t('msg.connectionError', { detail: String(err) }), 'error');
   } finally {
     testBtn.removeAttribute('disabled');
   }
@@ -224,11 +229,11 @@ enableEncryptionBtn.addEventListener('click', async () => {
   const password = encInputs.password.value;
   const confirm = encInputs.passwordConfirm.value;
   if (!password) {
-    showMessage('Please enter a master password', 'error');
+    showMessage(t('msg.masterPasswordRequired'), 'error');
     return;
   }
   if (password !== confirm) {
-    showMessage('Passwords do not match', 'error');
+    showMessage(t('msg.passwordMismatch'), 'error');
     return;
   }
 
@@ -237,10 +242,7 @@ enableEncryptionBtn.addEventListener('click', async () => {
   if (!(await getSettings())) {
     const formSettings = readFormSettings();
     if (typeof formSettings === 'string') {
-      showMessage(
-        'Please fill in the storage backend above before enabling encryption.',
-        'error',
-      );
+      showMessage(t('msg.backendRequired'), 'error');
       return;
     }
     if (!(await ensureHostPermissions(getRequiredOrigins(formSettings)))) {
@@ -250,22 +252,27 @@ enableEncryptionBtn.addEventListener('click', async () => {
   }
 
   enableEncryptionBtn.setAttribute('disabled', 'true');
-  showMessage('Enabling encryption...', 'info');
+  showMessage(t('msg.enablingEncryption'), 'info');
   try {
     const response = (await browser.runtime.sendMessage({
       type: 'SETUP_ENCRYPTION',
       password,
     })) as { success?: boolean; error?: string } | undefined;
     if (response?.success) {
-      showMessage('Encryption enabled. Remote data is now encrypted.', 'success');
+      showMessage(t('msg.encryptionEnabled'), 'success');
       encInputs.password.value = '';
       encInputs.passwordConfirm.value = '';
       renderEncryptionState(true);
     } else {
-      showMessage(`Failed to enable encryption: ${response?.error ?? 'Unknown error'}`, 'error');
+      showMessage(
+        t('msg.enableEncryptionFailed', {
+          detail: response?.error ?? t('common.unknownError'),
+        }),
+        'error',
+      );
     }
   } catch (err) {
-    showMessage(`Encryption error: ${err}`, 'error');
+    showMessage(t('msg.encryptionError', { detail: String(err) }), 'error');
   } finally {
     enableEncryptionBtn.removeAttribute('disabled');
   }
@@ -273,21 +280,26 @@ enableEncryptionBtn.addEventListener('click', async () => {
 
 disableEncryptionBtn.addEventListener('click', async () => {
   disableEncryptionBtn.setAttribute('disabled', 'true');
-  showMessage('Disabling encryption...', 'info');
+  showMessage(t('msg.disablingEncryption'), 'info');
   try {
     const response = (await browser.runtime.sendMessage({
       type: 'DISABLE_ENCRYPTION',
     })) as { success?: boolean; error?: string } | undefined;
     if (response?.success) {
-      showMessage('Encryption disabled. Remote data is now stored in plaintext.', 'success');
+      showMessage(t('msg.encryptionDisabled'), 'success');
       encInputs.oldPassword.value = '';
       encInputs.newPassword.value = '';
       renderEncryptionState(false);
     } else {
-      showMessage(`Failed to disable encryption: ${response?.error ?? 'Unknown error'}`, 'error');
+      showMessage(
+        t('msg.disableEncryptionFailed', {
+          detail: response?.error ?? t('common.unknownError'),
+        }),
+        'error',
+      );
     }
   } catch (err) {
-    showMessage(`Encryption error: ${err}`, 'error');
+    showMessage(t('msg.encryptionError', { detail: String(err) }), 'error');
   } finally {
     disableEncryptionBtn.removeAttribute('disabled');
   }
@@ -297,11 +309,11 @@ changePasswordBtn.addEventListener('click', async () => {
   const oldPassword = encInputs.oldPassword.value;
   const newPassword = encInputs.newPassword.value;
   if (!newPassword) {
-    showMessage('Please enter a new password', 'error');
+    showMessage(t('msg.newPasswordRequired'), 'error');
     return;
   }
   changePasswordBtn.setAttribute('disabled', 'true');
-  showMessage('Changing password...', 'info');
+  showMessage(t('msg.changingPassword'), 'info');
   try {
     const response = (await browser.runtime.sendMessage({
       type: 'CHANGE_PASSWORD',
@@ -309,21 +321,36 @@ changePasswordBtn.addEventListener('click', async () => {
       newPassword,
     })) as { success?: boolean; error?: string } | undefined;
     if (response?.success) {
-      showMessage('Master password changed and remote data re-encrypted.', 'success');
+      showMessage(t('msg.passwordChanged'), 'success');
       encInputs.oldPassword.value = '';
       encInputs.newPassword.value = '';
     } else {
-      showMessage(`Failed to change password: ${response?.error ?? 'Unknown error'}`, 'error');
+      showMessage(
+        t('msg.changePasswordFailed', {
+          detail: response?.error ?? t('common.unknownError'),
+        }),
+        'error',
+      );
     }
   } catch (err) {
-    showMessage(`Encryption error: ${err}`, 'error');
+    showMessage(t('msg.encryptionError', { detail: String(err) }), 'error');
   } finally {
     changePasswordBtn.removeAttribute('disabled');
   }
 });
 
-loadSettings();
-loadConflicts();
+// Initialize i18n first (detects the system language on first launch),
+// then wire up the language selector and load page data.
+async function init(): Promise<void> {
+  await initI18n();
+  await initLanguageSelect(languageSelect, () => {
+    // Re-render dynamic content in the newly selected language.
+    loadConflicts();
+  });
+  loadSettings();
+  loadConflicts();
+}
+void init();
 
 // --- Conflict review ---
 
@@ -353,18 +380,20 @@ function renderConflicts(conflicts: SyncConflict[]): void {
 
     const heading = document.createElement('div');
     heading.className = 'conflict-title';
-    heading.textContent = conflict.title || '(untitled)';
+    heading.textContent = conflict.title || t('conflict.untitled');
     card.appendChild(heading);
 
     const versions = document.createElement('div');
     versions.className = 'conflict-versions';
-    versions.appendChild(versionBox('Local', conflict.local));
-    versions.appendChild(versionBox('Remote', conflict.remote));
+    versions.appendChild(versionBox(t('conflict.localPanel'), conflict.local));
+    versions.appendChild(versionBox(t('conflict.remotePanel'), conflict.remote));
     card.appendChild(versions);
 
     const autoNote = document.createElement('div');
     autoNote.className = 'hint';
-    autoNote.textContent = `Currently keeping the ${conflict.autoChosen} version.`;
+    autoNote.textContent = t('conflict.keeping', {
+      choice: t(`conflict.${conflict.autoChosen}`),
+    });
     card.appendChild(autoNote);
 
     const actions = document.createElement('div');
@@ -372,12 +401,12 @@ function renderConflicts(conflicts: SyncConflict[]): void {
 
     const keepLocal = document.createElement('button');
     keepLocal.className = 'btn-secondary';
-    keepLocal.textContent = 'Keep Local';
+    keepLocal.textContent = t('conflict.keepLocal');
     keepLocal.addEventListener('click', () => resolveConflictUI(conflict.stableId, 'local'));
 
     const keepRemote = document.createElement('button');
     keepRemote.className = 'btn-secondary';
-    keepRemote.textContent = 'Keep Remote';
+    keepRemote.textContent = t('conflict.keepRemote');
     keepRemote.addEventListener('click', () => resolveConflictUI(conflict.stableId, 'remote'));
 
     actions.appendChild(keepLocal);
@@ -397,7 +426,7 @@ function versionBox(label: string, node: BookmarkNode): HTMLDivElement {
   strong.textContent = label;
   box.appendChild(strong);
   box.appendChild(document.createElement('br'));
-  box.appendChild(document.createTextNode(node.title || '(untitled)'));
+  box.appendChild(document.createTextNode(node.title || t('conflict.untitled')));
 
   if (node.url) {
     box.appendChild(document.createElement('br'));
@@ -413,7 +442,8 @@ async function resolveConflictUI(
   stableId: string,
   choice: 'local' | 'remote',
 ): Promise<void> {
-  showMessage(`Resolving conflict (keeping ${choice})...`, 'info');
+  const choiceLabel = t(`conflict.${choice}`);
+  showMessage(t('conflict.resolving', { choice: choiceLabel }), 'info');
   try {
     const response = (await browser.runtime.sendMessage({
       type: 'RESOLVE_CONFLICT',
@@ -421,12 +451,15 @@ async function resolveConflictUI(
       choice,
     })) as { success?: boolean; error?: string } | undefined;
     if (response?.success) {
-      showMessage(`Conflict resolved. The ${choice} version was kept and is syncing.`, 'success');
+      showMessage(t('conflict.resolved', { choice: choiceLabel }), 'success');
       await loadConflicts();
     } else {
-      showMessage(`Failed to resolve conflict: ${response?.error ?? 'Unknown error'}`, 'error');
+      showMessage(
+        t('conflict.resolveFailed', { detail: response?.error ?? t('common.unknownError') }),
+        'error',
+      );
     }
   } catch (err) {
-    showMessage(`Resolve error: ${err}`, 'error');
+    showMessage(t('conflict.resolveError', { detail: String(err) }), 'error');
   }
 }
