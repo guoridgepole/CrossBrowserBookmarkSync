@@ -59,7 +59,7 @@ syncBtn.addEventListener('click', () => {
       const detail = response?.message ?? 'Unknown error';
       statusEl.textContent = `Sync failed: ${detail}`;
       statusEl.title = detail;
-      console.error('[BookmarkSync] Sync failed:', detail);
+      console.error('[CrossBrowserBookmarkSync] Sync failed:', detail);
     }
     syncBtn.disabled = false;
   }).catch((err: unknown) => {

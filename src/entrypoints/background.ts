@@ -45,7 +45,7 @@ const CHANGE_SYNC_DEBOUNCE_MS = 5000;
 let changeSyncTimer: ReturnType<typeof setTimeout> | null = null;
 
 export default defineBackground(() => {
-  logger.info('Bookmark Sync background loaded');
+  logger.info('CrossBrowserBookmarkSync background loaded');
 
   // --- Startup sequence ---
   initializeBackground();

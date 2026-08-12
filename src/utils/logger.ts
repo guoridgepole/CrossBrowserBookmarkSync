@@ -23,7 +23,7 @@ function shouldLog(level: LogLevel): boolean {
 
 function formatMessage(level: LogLevel, message: string): string {
   const timestamp = new Date().toISOString();
-  return `[${timestamp}] [${level}] [BookmarkSync] ${message}`;
+  return `[${timestamp}] [${level}] [CrossBrowserBookmarkSync] ${message}`;
 }
 
 export const logger = {

@@ -7,7 +7,7 @@ export default defineConfig({
   manifest: (env) => {
     const isFirefox = env.browser === 'firefox';
     return {
-      name: 'Bookmark Sync',
+      name: 'CrossBrowserBookmarkSync',
       description:
         'Cross-browser bookmark sync supporting S3 and WebDAV storage backends',
       version: '0.1.0',

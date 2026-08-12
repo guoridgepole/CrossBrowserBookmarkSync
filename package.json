@@ -1,5 +1,5 @@
 {
-  "name": "bookmark-sync",
+  "name": "crossbrowserbookmarksync",
   "description": "Cross-browser bookmark sync extension supporting S3 and WebDAV",
   "private": true,
   "version": "0.1.0",
