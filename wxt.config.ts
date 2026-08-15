@@ -10,7 +10,7 @@ export default defineConfig({
       name: 'CrossBrowserBookmarkSync',
       description:
         'Cross-browser bookmark sync supporting S3 and WebDAV storage backends',
-      version: '0.1.0',
+      version: '0.2.0',
       icons: {
         16: 'icon-16.png',
         32: 'icon-32.png',
